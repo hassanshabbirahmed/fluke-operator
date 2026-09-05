@@ -1,0 +1,11 @@
+apiVersion: fluke.example.com/v1alpha1
+kind: Fluke
+metadata:
+  name: demo
+  labels:
+    app.kubernetes.io/name: fluke-operator
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  replicas: 2
+  flukesPerReplica: 1
+  image: busybox
