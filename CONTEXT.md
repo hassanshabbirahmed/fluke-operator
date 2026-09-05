@@ -7,6 +7,14 @@ Built incrementally as a series of lessons — see the map at
 
 ## Language
 
+**Fluke**:
+The custom resource this project's operator manages: a workload that wants some number of replicas, each needing a fixed number of fluke devices. Its `spec` states that intent; its `status` (`phase`, `readyReplicas`, `allocatedFlukes`, `conditions`) reports what the controller has actually achieved. Validated design: [issue #6](https://github.com/hassanshabbirahmed/fluke-operator/issues/6), detail in `docs/notes/03-fluke-design.md`.
+_Avoid_: FlukeSpec/FlukeStatus in prose (those are the Go types; "Fluke" is the resource)
+
+**fluke device**:
+The allocatable unit a `Fluke` replica claims via DRA — one entry in the cluster's fluke `DeviceClass` pool. Distinct from a `Fluke` (the resource asking for devices) — a single `Fluke` with `replicas: 2, flukesPerReplica: 3` wants 6 fluke devices in total.
+_Avoid_: fluke, flukes (ambiguous with the `Fluke` resource — always say "fluke device(s)")
+
 **DeviceClass**:
 A cluster-scoped catalog entry describing one category of allocatable device (e.g. "a fluke device"), including the CEL selectors used to match specific devices to it. Defined once per device category, referenced by many claims.
 _Avoid_: device type, device kind
