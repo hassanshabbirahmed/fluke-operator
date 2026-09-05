@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PROTOTYPE — Fluke reconcile loop (throwaway, see issue #6)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F6F3EC; --surface:#FFFFFF; --surface-2:#EFEAE0; --ink:#211E19; --muted:#746F5E;
+    --line:#E1DAC7; --accent:#C1602A; --accent-ink:#FFFFFF; --accent-soft:#F3E1D2;
+    --good:#3E7A4F; --good-soft:#E4EFE2; --warn:#B8802B; --warn-soft:#F5E9D5;
+    --bad:#B23B34; --bad-soft:#F6E1DF; --mono-tint:#FBF9F3; --focus:#8A6E2E;
+    --font-display:'IBM Plex Sans',system-ui,sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#16140F; --surface:#211E17; --surface-2:#2A261C; --ink:#EFEAE0; --muted:#A29B87;
+      --line:#3A3527; --accent:#E08A47; --accent-ink:#1B1208; --accent-soft:#3A2A1A;
+      --good:#5FAE74; --good-soft:#1E2E20; --warn:#D6A24B; --warn-soft:#332711;
+      --bad:#E1685F; --bad-soft:#341E1C; --mono-tint:#1C1911; --focus:#E08A47;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#16140F; --surface:#211E17; --surface-2:#2A261C; --ink:#EFEAE0; --muted:#A29B87;
+    --line:#3A3527; --accent:#E08A47; --accent-ink:#1B1208; --accent-soft:#3A2A1A;
+    --good:#5FAE74; --good-soft:#1E2E20; --warn:#D6A24B; --warn-soft:#332711;
+    --bad:#E1685F; --bad-soft:#341E1C; --mono-tint:#1C1911; --focus:#E08A47;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-display);
+    font-size:15px; line-height:1.5;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:28px 24px 64px;}
+  header{margin-bottom:22px;}
+  .kicker{
+    font-family:var(--font-mono); font-size:11.5px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; margin:0 0 8px;
+  }
+  h1{font-size:26px; margin:0 0 10px; text-wrap:balance; font-weight:700;}
+  .question{
+    max-width:70ch; color:var(--muted); margin:0; font-size:15px;
+  }
+  .question b{color:var(--ink); font-weight:600;}
+
+  .tabs{
+    display:flex; flex-wrap:wrap; gap:6px; margin:22px 0 18px; padding:4px;
+    background:var(--surface-2); border-radius:10px; width:fit-content;
+  }
+  .tab{
+    font-family:var(--font-display); font-size:13px; font-weight:600; color:var(--muted);
+    background:transparent; border:none; padding:8px 14px; border-radius:7px; cursor:pointer;
+  }
+  .tab[aria-selected="true"]{background:var(--surface); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.08);}
+  .tab:focus-visible{outline:2px solid var(--focus); outline-offset:2px;}
+
+  .scenario-desc{
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    padding:14px 16px; margin-bottom:18px; font-size:14px; color:var(--muted); display:none;
+  }
+  .scenario-desc.active{display:block;}
+  .scenario-desc b{color:var(--ink);}
+
+  .grid{display:grid; grid-template-columns:1.1fr 1fr; gap:20px; align-items:start;}
+  @media (max-width:880px){.grid{grid-template-columns:1fr;}}
+
+  .card{
+    background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px 18px 16px;
+  }
+  .card + .card{margin-top:16px;}
+  .card h2{
+    font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted);
+    margin:0 0 12px; font-weight:600;
+  }
+
+  .yaml{
+    background:var(--mono-tint); border:1px solid var(--line); border-radius:8px;
+    padding:14px 16px; font-family:var(--font-mono); font-size:12.5px; line-height:1.65;
+    white-space:pre; overflow-x:auto; margin:0; color:var(--ink);
+  }
+  .yaml .k{color:var(--muted);}
+  .yaml .v{color:var(--ink); font-weight:500;}
+  .yaml .comment{color:var(--muted); font-style:italic;}
+
+  .pill{
+    display:inline-flex; align-items:center; gap:5px; font-family:var(--font-mono);
+    font-size:11.5px; font-weight:600; padding:2px 9px; border-radius:999px; letter-spacing:.02em;
+  }
+  .pill-ready{background:var(--good-soft); color:var(--good);}
+  .pill-progressing{background:var(--warn-soft); color:var(--warn);}
+  .pill-degraded{background:var(--bad-soft); color:var(--bad);}
+  .pill-gone{background:var(--surface-2); color:var(--muted);}
+
+  .gauge-row{display:flex; align-items:center; gap:12px; margin-top:6px;}
+  .gauge{flex:1; height:10px; border-radius:999px; background:var(--surface-2); overflow:hidden; position:relative;}
+  .gauge-fill{height:100%; background:var(--accent); border-radius:999px 0 0 999px; transition:width .25s ease;}
+  .gauge-label{font-family:var(--font-mono); font-size:12px; color:var(--muted); white-space:nowrap;}
+
+  .btn-group{margin-bottom:14px;}
+  .btn-group-label{font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600; margin:0 0 8px;}
+  .btn-row{display:flex; flex-wrap:wrap; gap:8px;}
+  button.action{
+    font-family:var(--font-mono); font-size:12.5px; font-weight:500; color:var(--ink);
+    background:var(--surface-2); border:1px solid var(--line); border-radius:7px;
+    padding:8px 11px; cursor:pointer; text-align:left; line-height:1.35;
+  }
+  button.action:hover{border-color:var(--accent);}
+  button.action:focus-visible{outline:2px solid var(--focus); outline-offset:1px;}
+  button.action:disabled{opacity:.4; cursor:not-allowed;}
+  button.action.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
+  button.action.next-step{outline:2px solid var(--accent); outline-offset:1px;}
+
+  .steps{list-style:none; margin:0 0 14px; padding:0; display:flex; flex-direction:column; gap:6px;}
+  .steps li{display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:12.5px; color:var(--muted);}
+  .steps li.done{color:var(--good);}
+  .steps li .n{
+    width:18px; height:18px; border-radius:50%; background:var(--surface-2); color:var(--muted);
+    display:inline-flex; align-items:center; justify-content:center; font-size:10.5px; flex:none;
+  }
+  .steps li.done .n{background:var(--good-soft); color:var(--good);}
+
+  .log{
+    background:var(--mono-tint); border:1px solid var(--line); border-radius:8px; padding:10px 12px;
+    font-family:var(--font-mono); font-size:12px; line-height:1.7; height:220px; overflow-y:auto;
+  }
+  .log .tick{color:var(--accent); font-weight:600;}
+  .log .decision{color:var(--ink);}
+  .log .empty{color:var(--muted); font-style:italic;}
+  .log-entry{border-bottom:1px dashed var(--line); padding:4px 0;}
+  .log-entry:last-child{border-bottom:none;}
+
+  footer{margin-top:28px; font-size:12.5px; color:var(--muted); max-width:70ch;}
+  footer a{color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="kicker">Prototype · throwaway · issue #6</p>
+    <h1>Does the Fluke reconcile loop hold up?</h1>
+    <p class="question">
+      Feeling out the <b>Fluke</b> v1alpha1 spec/status shape and the controller's reconcile
+      decisions — creation, drift correction, scaling, DRA device allocation, and graceful
+      deletion via a finalizer — before any of it becomes real Go. Click <b>Trigger reconcile</b>
+      after every change; a real controller is <b>level-triggered</b>: it re-derives what should
+      happen from current state alone, safe to run any number of times.
+    </p>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="Scenario"></div>
+  <div id="scenario-descs"></div>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>kubectl get fluke demo -o yaml</h2>
+        <pre class="yaml" id="yaml-fluke"></pre>
+      </div>
+      <div class="card">
+        <h2>Owned Deployment <span style="font-weight:400; text-transform:none; letter-spacing:0;">(ownerReference → demo)</span></h2>
+        <pre class="yaml" id="yaml-deployment"></pre>
+      </div>
+      <div class="card">
+        <h2>Fluke device pool (DeviceClass fluke.example.com)</h2>
+        <div class="gauge-row">
+          <div class="gauge"><div class="gauge-fill" id="gauge-fill"></div></div>
+          <span class="gauge-label" id="gauge-label"></span>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card" id="steps-card" style="display:none;">
+        <h2>Guided steps</h2>
+        <ul class="steps" id="steps-list"></ul>
+      </div>
+      <div class="card">
+        <h2>Actions</h2>
+        <div id="action-groups"></div>
+      </div>
+      <div class="card">
+        <h2>Reconcile trace</h2>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Pure model lives in <code>Model</code> below — no DOM references inside it, so the validated
+    reconcile shape lifts straight into <code>internal/controller/fluke_controller.go</code> in
+    Lesson 3. Rendering is a thin shell over it. See
+    <a href="https://github.com/hassanshabbirahmed/fluke-operator/issues/6">issue #6</a> for the question this answers.
+  </footer>
+</div>
+
+<script>
+// =====================================================================
+// Model — pure. No DOM, no globals besides this IIFE's exports. This is
+// the part that's meant to survive past the prototype: the reconcile
+// decision tree lifts directly into the real controller.
+// =====================================================================
+const Model = (() => {
+  const AVAILABLE_DEVICES = 6;
+
+  function initial() {
+    return { fluke: null, deployment: null, allocatedDevices: 0, status: null, events: [] };
+  }
+
+  function applyFluke(state, { replicas, flukesPerReplica, image }) {
+    const existed = !!state.fluke;
+    const fluke = existed
+      ? { ...state.fluke, spec: { replicas, flukesPerReplica, image } }
+      : { name: 'demo', spec: { replicas, flukesPerReplica, image }, deletionRequested: false, finalizers: [] };
+    const verb = existed ? 'kubectl apply — spec updated' : 'kubectl apply — Fluke created';
+    return note(state, { ...state, fluke }, `${verb}: replicas=${replicas}, flukesPerReplica=${flukesPerReplica}, image=${image}`);
+  }
+
+  function kubeletProgress(state) {
+    if (!state.deployment) return note(state, state, 'No Deployment exists yet — nothing for the kubelet to report.');
+    if (state.deployment.readyReplicas >= state.deployment.replicas) {
+      return note(state, state, 'All pods already Ready — kubelet has nothing new to report.');
+    }
+    const deployment = { ...state.deployment, readyReplicas: state.deployment.readyReplicas + 1 };
+    return note(state, { ...state, deployment }, `Kubelet: one more pod became Ready (${deployment.readyReplicas}/${deployment.replicas}).`);
+  }
+
+  function chaosDeleteDeployment(state) {
+    if (!state.deployment) return note(state, state, 'No Deployment exists — nothing to delete.');
+    return note(state, { ...state, deployment: null }, 'Chaos: someone ran `kubectl delete deployment demo` directly.');
+  }
+
+  function chaosEditImage(state) {
+    if (!state.deployment) return note(state, state, 'No Deployment exists — nothing to edit.');
+    const deployment = { ...state.deployment, image: 'unofficial:latest' };
+    return note(state, { ...state, deployment }, 'Chaos: someone edited the Deployment’s image directly to "unofficial:latest".');
+  }
+
+  function requestDelete(state) {
+    if (!state.fluke) return note(state, state, 'No Fluke exists — nothing to delete.');
+    const fluke = { ...state.fluke, deletionRequested: true };
+    return note(state, { ...state, fluke }, 'kubectl delete fluke demo — deletionTimestamp set; object stays until finalizers clear.');
+  }
+
+  // The reconcile loop itself: pure, idempotent, level-triggered.
+  // Re-derives every decision from current state; safe to call repeatedly.
+  function reconcile(state) {
+    const log = [];
+    let { fluke, deployment, allocatedDevices, status } = state;
+
+    if (!fluke) {
+      log.push('No Fluke named "demo" — nothing to reconcile.');
+      return note(state, state, log);
+    }
+
+    if (fluke.deletionRequested) {
+      if (fluke.finalizers.length > 0) {
+        if (allocatedDevices > 0) {
+          log.push(`Finalizer fluke.example.com/cleanup: releasing ${allocatedDevices} allocated fluke device(s).`);
+        } else {
+          log.push('Finalizer fluke.example.com/cleanup: no devices were allocated.');
+        }
+        log.push('Owned Deployment removed by owner-reference cascade.');
+        log.push('Cleanup done — removing the finalizer.');
+        fluke = { ...fluke, finalizers: [] };
+        deployment = null;
+        allocatedDevices = 0;
+        status = null;
+        return note(state, { ...state, fluke, deployment, allocatedDevices, status }, log);
+      }
+      log.push('Finalizer already gone — the API server deletes the object now.');
+      return note(state, initial(), log);
+    }
+
+    if (fluke.finalizers.length === 0) {
+      log.push('No finalizer present yet — adding fluke.example.com/cleanup so deletion waits for our cleanup.');
+      fluke = { ...fluke, finalizers: ['fluke.example.com/cleanup'] };
+    }
+
+    if (!deployment) {
+      log.push(`Deployment missing — creating it (replicas=${fluke.spec.replicas}, image=${fluke.spec.image}).`);
+      deployment = { replicas: fluke.spec.replicas, image: fluke.spec.image, readyReplicas: 0 };
+    } else if (deployment.replicas !== fluke.spec.replicas || deployment.image !== fluke.spec.image) {
+      log.push(`Deployment drifted from spec (replicas=${deployment.replicas}, image=${deployment.image}) — correcting to match.`);
+      deployment = {
+        ...deployment,
+        replicas: fluke.spec.replicas,
+        image: fluke.spec.image,
+        readyReplicas: Math.min(deployment.readyReplicas, fluke.spec.replicas),
+      };
+    } else {
+      log.push('Deployment already matches spec — no change needed.');
+    }
+
+    const desired = fluke.spec.replicas * fluke.spec.flukesPerReplica;
+    const grantable = Math.min(desired, AVAILABLE_DEVICES);
+    if (grantable !== allocatedDevices) {
+      log.push(`Desired ${desired} fluke device(s) via ResourceClaimTemplate; pool has ${AVAILABLE_DEVICES} — now holding ${grantable}.`);
+      allocatedDevices = grantable;
+    } else {
+      log.push(`Device allocation already at ${allocatedDevices}/${desired} — no change needed.`);
+    }
+
+    let phase, condition;
+    if (deployment.readyReplicas < fluke.spec.replicas) {
+      phase = 'Progressing';
+      condition = { type: 'Available', status: 'False', reason: 'ReplicasNotReady', message: `${deployment.readyReplicas}/${fluke.spec.replicas} pods ready` };
+    } else if (allocatedDevices < desired) {
+      phase = 'Degraded';
+      condition = { type: 'Available', status: 'False', reason: 'InsufficientDevices', message: `only ${allocatedDevices}/${desired} fluke devices available` };
+    } else {
+      phase = 'Ready';
+      condition = { type: 'Available', status: 'True', reason: 'AllReplicasReady', message: 'all replicas ready with devices allocated' };
+    }
+    log.push(`Status → phase=${phase}, readyReplicas=${deployment.readyReplicas}, allocatedFlukes=${allocatedDevices}.`);
+    status = { phase, readyReplicas: deployment.readyReplicas, allocatedFlukes: allocatedDevices, conditions: [condition] };
+
+    return note(state, { ...state, fluke, deployment, allocatedDevices, status }, log);
+  }
+
+  function note(prevState, nextState, lines) {
+    const arr = Array.isArray(lines) ? lines : [lines];
+    return { ...nextState, events: [...prevState.events, ...arr.map((text) => ({ text }))] };
+  }
+
+  return { initial, applyFluke, kubeletProgress, chaosDeleteDeployment, chaosEditImage, requestDelete, reconcile, AVAILABLE_DEVICES };
+})();
+
+// =====================================================================
+// UI shell — everything below touches the DOM. Throwaway.
+// =====================================================================
+const ACTIONS = {
+  applyBaseline: { label: 'Apply Fluke\n(replicas:2, flukesPerReplica:1, image:busybox)', run: (s) => Model.applyFluke(s, { replicas: 2, flukesPerReplica: 1, image: 'busybox' }) },
+  applyShortage: { label: 'Apply Fluke\n(replicas:4, flukesPerReplica:2, image:busybox)', run: (s) => Model.applyFluke(s, { replicas: 4, flukesPerReplica: 2, image: 'busybox' }) },
+  scaleUp: { label: 'Edit spec: scale to replicas:4', run: (s) => Model.applyFluke(s, { ...s.fluke.spec, replicas: 4 }) },
+  reconcile: { label: 'Trigger reconcile', run: (s) => Model.reconcile(s), primary: true },
+  kubelet: { label: 'Kubelet: one more pod Ready', run: (s) => Model.kubeletProgress(s) },
+  chaosDelete: { label: 'Chaos: kubectl delete the Deployment', run: (s) => Model.chaosDeleteDeployment(s) },
+  chaosImage: { label: 'Chaos: hand-edit the Deployment image', run: (s) => Model.chaosEditImage(s) },
+  requestDelete: { label: 'kubectl delete fluke demo', run: (s) => Model.requestDelete(s) },
+};
+
+const GROUPS = [
+  { label: 'Author intent', actions: ['applyBaseline', 'applyShortage', 'scaleUp', 'requestDelete'] },
+  { label: 'Cluster reality', actions: ['kubelet', 'chaosDelete', 'chaosImage'] },
+  { label: 'Controller', actions: ['reconcile'] },
+];
+
+const SCENARIOS = [
+  { id: 'free', label: 'Free play' },
+  {
+    id: 'happy', label: 'Happy path',
+    desc: 'Create a Fluke, let reconcile create its Deployment, watch pods come up and devices get allocated.',
+    steps: ['applyBaseline', 'reconcile', 'kubelet', 'kubelet', 'reconcile'],
+  },
+  {
+    id: 'heal', label: 'Self-healing',
+    desc: 'Once Ready, someone deletes the Deployment by hand. Does reconcile notice and recreate it?',
+    steps: ['applyBaseline', 'reconcile', 'kubelet', 'kubelet', 'reconcile', 'chaosDelete', 'reconcile', 'kubelet', 'kubelet', 'reconcile'],
+  },
+  {
+    id: 'scale', label: 'Scale mid-flight',
+    desc: 'Once Ready at 2 replicas, edit the spec up to 4. Does the Deployment and device count follow?',
+    steps: ['applyBaseline', 'reconcile', 'kubelet', 'kubelet', 'reconcile', 'scaleUp', 'reconcile', 'kubelet', 'kubelet', 'reconcile'],
+  },
+  {
+    id: 'delete', label: 'Graceful deletion',
+    desc: 'Delete a Ready Fluke. The finalizer should release its devices and remove the Deployment before the object actually disappears.',
+    steps: ['applyBaseline', 'reconcile', 'kubelet', 'kubelet', 'reconcile', 'requestDelete', 'reconcile', 'reconcile'],
+  },
+  {
+    id: 'shortage', label: 'Device shortage',
+    desc: 'Ask for 8 fluke devices when only 6 exist. It should report Degraded with a clear reason, not crash.',
+    steps: ['applyShortage', 'reconcile', 'kubelet', 'kubelet', 'kubelet', 'kubelet', 'reconcile'],
+  },
+];
+
+let state = Model.initial();
+let activeScenario = 'free';
+let stepIndex = 0;
+
+function dispatch(actionId) {
+  state = ACTIONS[actionId].run(state);
+  if (activeScenario !== 'free') {
+    const seq = SCENARIOS.find((s) => s.id === activeScenario).steps;
+    if (seq[stepIndex] === actionId) stepIndex++;
+  }
+  render();
+}
+
+function selectScenario(id) {
+  activeScenario = id;
+  stepIndex = 0;
+  state = Model.initial();
+  render();
+}
+
+function yamlFluke(s) {
+  if (!s.fluke) return '<span class="comment"># kubectl get fluke demo\n# Error from server (NotFound)</span>';
+  const f = s.fluke, st = s.status;
+  const finalizers = f.finalizers.length ? `[${f.finalizers.map((x) => `"${x}"`).join(', ')}]` : '[]';
+  let out = '';
+  out += `<span class="k">apiVersion:</span> <span class="v">fluke.example.com/v1alpha1</span>\n`;
+  out += `<span class="k">kind:</span> <span class="v">Fluke</span>\n`;
+  out += `<span class="k">metadata:</span>\n  <span class="k">name:</span> <span class="v">${f.name}</span>\n  <span class="k">finalizers:</span> <span class="v">${finalizers}</span>\n`;
+  if (f.deletionRequested) out += `  <span class="k">deletionTimestamp:</span> <span class="v">2026-09-05T00:00:00Z</span>\n`;
+  out += `<span class="k">spec:</span>\n  <span class="k">replicas:</span> <span class="v">${f.spec.replicas}</span>\n  <span class="k">flukesPerReplica:</span> <span class="v">${f.spec.flukesPerReplica}</span>\n  <span class="k">image:</span> <span class="v">${f.spec.image}</span>\n`;
+  if (st) {
+    out += `<span class="k">status:</span>\n  <span class="k">phase:</span> <span class="v">${st.phase}</span>\n  <span class="k">readyReplicas:</span> <span class="v">${st.readyReplicas}</span>\n  <span class="k">allocatedFlukes:</span> <span class="v">${st.allocatedFlukes}</span>\n  <span class="k">conditions:</span>\n`;
+    st.conditions.forEach((c) => {
+      out += `  - <span class="k">type:</span> <span class="v">${c.type}</span>\n    <span class="k">status:</span> <span class="v">"${c.status}"</span>\n    <span class="k">reason:</span> <span class="v">${c.reason}</span>\n    <span class="k">message:</span> <span class="v">${c.message}</span>\n`;
+    });
+  } else {
+    out += `<span class="comment"># status: not yet written — reconcile hasn't run</span>`;
+  }
+  return out;
+}
+
+function yamlDeployment(s) {
+  if (!s.deployment) return '<span class="comment"># does not exist</span>';
+  const d = s.deployment;
+  return `<span class="k">spec:</span>\n  <span class="k">replicas:</span> <span class="v">${d.replicas}</span>\n  <span class="k">image:</span> <span class="v">${d.image}</span>\n<span class="k">status:</span>\n  <span class="k">readyReplicas:</span> <span class="v">${d.readyReplicas}</span>`;
+}
+
+function pillFor(phase) {
+  if (!phase) return '';
+  const cls = { Ready: 'pill-ready', Progressing: 'pill-progressing', Degraded: 'pill-degraded' }[phase] || 'pill-gone';
+  return `<span class="pill ${cls}">${phase}</span>`;
+}
+
+function render() {
+  // tabs
+  const tabsEl = document.querySelector('.tabs');
+  tabsEl.innerHTML = '';
+  SCENARIOS.forEach((sc) => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(sc.id === activeScenario));
+    b.textContent = sc.label;
+    b.onclick = () => selectScenario(sc.id);
+    tabsEl.appendChild(b);
+  });
+
+  const descsEl = document.getElementById('scenario-descs');
+  descsEl.innerHTML = '';
+  SCENARIOS.filter((s) => s.desc).forEach((sc) => {
+    const d = document.createElement('div');
+    d.className = 'scenario-desc' + (sc.id === activeScenario ? ' active' : '');
+    d.innerHTML = `<b>${sc.label}.</b> ${sc.desc}`;
+    descsEl.appendChild(d);
+  });
+
+  document.getElementById('yaml-fluke').innerHTML = yamlFluke(state) + '  ' + pillFor(state.status && state.status.phase);
+  document.getElementById('yaml-deployment').innerHTML = yamlDeployment(state);
+
+  const desired = state.fluke ? state.fluke.spec.replicas * state.fluke.spec.flukesPerReplica : 0;
+  const pct = Math.min(100, (state.allocatedDevices / Model.AVAILABLE_DEVICES) * 100);
+  document.getElementById('gauge-fill').style.width = pct + '%';
+  document.getElementById('gauge-label').textContent = `${state.allocatedDevices}/${Model.AVAILABLE_DEVICES} allocated${desired ? ` (desired ${desired})` : ''}`;
+
+  // steps card
+  const stepsCard = document.getElementById('steps-card');
+  const scenario = SCENARIOS.find((s) => s.id === activeScenario);
+  if (scenario && scenario.steps) {
+    stepsCard.style.display = '';
+    const list = document.getElementById('steps-list');
+    list.innerHTML = '';
+    scenario.steps.forEach((actionId, i) => {
+      const li = document.createElement('li');
+      if (i < stepIndex) li.classList.add('done');
+      li.innerHTML = `<span class="n">${i < stepIndex ? '✓' : i + 1}</span> ${ACTIONS[actionId].label.split('\n')[0]}`;
+      list.appendChild(li);
+    });
+  } else {
+    stepsCard.style.display = 'none';
+  }
+
+  // action groups
+  const groupsEl = document.getElementById('action-groups');
+  groupsEl.innerHTML = '';
+  GROUPS.forEach((g) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'btn-group';
+    wrap.innerHTML = `<p class="btn-group-label">${g.label}</p>`;
+    const row = document.createElement('div');
+    row.className = 'btn-row';
+    g.actions.forEach((actionId) => {
+      const btn = document.createElement('button');
+      btn.className = 'action' + (ACTIONS[actionId].primary ? ' primary' : '');
+      if (scenario && scenario.steps && scenario.steps[stepIndex] === actionId) btn.classList.add('next-step');
+      btn.textContent = ACTIONS[actionId].label;
+      btn.style.whiteSpace = 'pre-line';
+      btn.onclick = () => dispatch(actionId);
+      row.appendChild(btn);
+    });
+    wrap.appendChild(row);
+    groupsEl.appendChild(wrap);
+  });
+
+  // log
+  const logEl = document.getElementById('log');
+  const wasAtBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 4;
+  if (state.events.length === 0) {
+    logEl.innerHTML = '<span class="empty">Nothing has happened yet — press an action.</span>';
+  } else {
+    logEl.innerHTML = state.events.map((e, i) => `<div class="log-entry"><span class="tick">[${i + 1}]</span> <span class="decision">${e.text}</span></div>`).join('');
+  }
+  if (wasAtBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+
+render();
+</script>
+</body>
+</html>
